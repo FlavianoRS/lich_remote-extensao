@@ -1,15 +1,26 @@
 // remoto: manda as permissões do opencode para o celular (extensão "remoto" do lich).
 // Usa o mesmo canal do hook do Claude Code: POST em 127.0.0.1/hook com o segredo de hook.json.
 // Fora do lich, sem a extensão ou com o modo remoto desligado, não faz nada e o diálogo segue no PC.
-import { readFileSync } from "node:fs"
+import { appendFileSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 
 const waiting = new Map() // requestID -> AbortController
 
+const dataDir = () => join(process.env.APPDATA || join(homedir(), ".config"), "lich", "extension-data", "remoto")
+
 function conf() {
-  const base = process.env.APPDATA || join(homedir(), ".config")
-  return JSON.parse(readFileSync(join(base, "lich", "extension-data", "remoto", "hook.json"), "utf8"))
+  return JSON.parse(readFileSync(join(dataDir(), "hook.json"), "utf8"))
+}
+
+// Mesma linha do hook.log que o remoto.exe escreve, para saber se o plugin carregou e viu o pedido.
+function logLine(ev, tool, decided) {
+  try {
+    const t = new Date().toLocaleString("sv-SE").slice(0, 19)
+    appendFileSync(join(dataDir(), "hook.log"),
+      `${t} ev=opencode:${ev} tool=${tool || ""} session=${process.env.LICH_SESSION_ID || ""} decided=${decided}
+`)
+  } catch {}
 }
 
 async function ask(client, serverUrl, p) {
@@ -31,8 +42,9 @@ async function ask(client, serverUrl, p) {
       body: JSON.stringify({ session, payload }),
       signal: ctl.signal,
     })
-    if (r.status !== 200) return
+    if (r.status !== 200) return logLine("permission", p.permission, false)
     const d = (await r.json())?.hookSpecificOutput?.decision
+    logLine("permission", p.permission, !!d)
     if (!d) return
     const reply = d.behavior === "allow" ? "once" : "reject"
     if (client?.permission?.reply) await client.permission.reply({ requestID: p.id, reply, message: d.message })
@@ -52,6 +64,7 @@ async function replyHTTP(serverUrl, p, reply, message) {
 }
 
 async function server(input) {
+  logLine("plugin-loaded", "", false)
   return {
     // Não aguarda: o opencode espera os hooks, e a pergunta pode levar minutos.
     event: async ({ event }) => {
