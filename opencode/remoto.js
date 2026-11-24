@@ -47,20 +47,39 @@ async function ask(client, serverUrl, p) {
     logLine("permission", p.permission, !!d)
     if (!d) return
     const reply = d.behavior === "allow" ? "once" : "reject"
-    if (client?.permission?.reply) await client.permission.reply({ requestID: p.id, reply, message: d.message })
-    else await replyHTTP(serverUrl, p, reply, d.message)
-  } catch {} finally {
+    const err = await replyTo(client, serverUrl, p, reply, d.message)
+    if (err) logLine("reply-falhou " + String(err).slice(0, 200).replace(/\s+/g, " "), p.permission, false)
+  } catch (e) {
+    if (e?.name !== "AbortError") logLine("erro " + String(e).slice(0, 200).replace(/\s+/g, " "), p.permission, false)
+  } finally {
     waiting.delete(p.id)
   }
 }
 
-// Sem o SDK novo no plugin: a rota nova, e a antiga (/session/:id/permissions/:id) se ela não existir.
-async function replyHTTP(serverUrl, p, reply, message) {
-  const post = (path, body) => fetch(new URL(path, serverUrl), {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-  })
-  const r = await post(`/permission/${p.id}/reply`, { reply, message })
-  if (!r.ok) await post(`/session/${p.sessionID}/permissions/${p.id}`, { response: reply })
+// Devolve a decisão ao opencode; "" = deu certo, senão o motivo da última tentativa.
+// O plugin do 1.x recebe o SDK v1 (postSessionIdPermissionsPermissionId, que devolve {error} em vez de lançar);
+// o 2.x tem client.permission.reply. O HTTP direto é o último recurso: no TUI o servidor costuma ser interno.
+async function replyTo(client, serverUrl, p, reply, message) {
+  const tries = [
+    client?.postSessionIdPermissionsPermissionId &&
+      (() => client.postSessionIdPermissionsPermissionId({ path: { id: p.sessionID, permissionID: p.id }, body: { response: reply } })),
+    client?.permission?.reply && (() => client.permission.reply({ requestID: p.id, reply, message })),
+    serverUrl && (() => fetch(new URL(`/session/${p.sessionID}/permissions/${p.id}`, serverUrl), {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ response: reply }),
+    })),
+  ].filter(Boolean)
+  let last = "nenhuma API de resposta no plugin"
+  for (const t of tries) {
+    try {
+      const r = await t()
+      if (r?.error) last = JSON.stringify(r.error)
+      else if (r instanceof Response && !r.ok) last = "HTTP " + r.status
+      else return ""
+    } catch (e) {
+      last = String(e)
+    }
+  }
+  return last
 }
 
 async function server(input) {
