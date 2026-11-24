@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<title>lich remoto</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header>
+  <h1>lich remoto</h1>
+  <span id="conn" class="dot" title="conexão"></span>
+  <label class="switch"><input type="checkbox" id="remote"><span>Modo remoto</span></label>
+</header>
+<div id="banner" hidden></div>
+<main id="app"></main>
+<footer>
+  <button id="btn-new">+ Nova sessão</button>
+  <button id="btn-push" class="ghost">Ativar notificações</button>
+</footer>
+<dialog id="dlg-new">
+  <form id="form-new" method="dialog">
+    <h2>Nova sessão</h2>
+    <label>Projeto <select name="project" required></select></label>
+    <label>Agente
+      <select name="provider">
+        <option value="">padrão do projeto</option>
+        <option>claude</option><option>codex</option><option>opencode</option><option>antigravity</option>
+      </select>
+    </label>
+    <label>Worktree (branch, opcional) <input name="worktree" autocomplete="off" autocapitalize="off"></label>
+    <label>Tarefa (opcional) <textarea name="prompt" rows="4"></textarea></label>
+    <menu><button value="cancel" formnovalidate class="ghost">Cancelar</button><button value="ok">Abrir</button></menu>
+  </form>
+</dialog>
+<script src="/app.js"></script>
+</body>
+</html>

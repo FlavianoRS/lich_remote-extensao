@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "id": "remoto",
+  "name": "Controle remoto",
+  "description": "Acompanhe e comande as sessões pelo celular, por um PWA na sua rede Tailscale.",
+  "version": "0.2.3",
+  "minLichVersion": "0.92.0",
+  "executable": "remoto.exe",
+  "surfaces": [
+    { "id": "main", "title": "Controle remoto", "icon": "smartphone" }
+  ],
+  "permissions": ["projects:read", "sessions:read", "sessions:write"]
+}
