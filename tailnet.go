@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -112,6 +113,11 @@ func (a *App) render() {
 		return
 	}
 	ts, remote, np, ns := a.ts, a.cfg.Remote, len(a.pending), len(a.cfg.Subs)
+	sessions := append([]extension.Session(nil), a.sessions...)
+	follow := map[string]bool{}
+	for k, v := range a.cfg.Follow {
+		follow[k] = v
+	}
 	a.mu.Unlock()
 
 	lbl := func(t string, size float64, w extension.FontWeight) extension.Node {
@@ -150,6 +156,20 @@ func (a *App) render() {
 		row = append(row, btn("Copiar endereço", "copy", extension.VariantSecondary))
 	}
 	kids = append(kids, extension.Box.New(extension.BoxProps{Direction: extension.DirectionRow, Gap: 8}, row...))
+
+	// Acompanhar: o celular avisa quando a sessão termina um turno ou fica aguardando. O histórico aparece no
+	// celular para qualquer sessão; marcar aqui é para começar no PC e seguir pelo celular.
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].Project < sessions[j].Project || sessions[i].Project == sessions[j].Project && sessions[i].Label < sessions[j].Label
+	})
+	kids = append(kids, extension.Separator.New(extension.NoProps{}),
+		lbl("Acompanhar no celular", 16, extension.FontSemibold),
+		lbl("Avisa no celular quando a sessão terminar um turno ou precisar de você.", 13, ""))
+	for _, se := range sessions {
+		kids = append(kids, extension.Box.New(extension.BoxProps{Direction: extension.DirectionRow, Gap: 8, Align: extension.AlignCenter},
+			extension.Switch.New(extension.SwitchProps{Checked: follow[se.ID], OnChange: extension.Handler("follow:" + se.ID)}),
+			lbl(se.Label+" · "+se.Project+" · "+se.Kind, 13, "")))
+	}
 	root := extension.Box.New(extension.BoxProps{Direction: extension.DirectionColumn, Gap: 12, Padding: 24}, kids...)
 	a.conn.Send(extension.Render.New(extension.RenderData{Surface: "main", Root: root}))
 }
@@ -158,6 +178,10 @@ func (a *App) onSurfaceEvent(h string) {
 	a.mu.Lock()
 	ts := a.ts
 	a.mu.Unlock()
+	if id, ok := strings.CutPrefix(h, "follow:"); ok {
+		a.setFollow(id, !a.followed(id))
+		return
+	}
 	switch h {
 	case "remote-on":
 		a.setRemote(true)

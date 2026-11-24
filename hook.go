@@ -19,6 +19,14 @@ const agyAsk = `{"decision":"ask"}`
 // plugin do opencode. Qualquer falha sai com 0 e sem decisão: o fluxo normal do PC segue.
 func runHook() int {
 	payload, _ := io.ReadAll(os.Stdin)
+	// Início de conversa / prompt (SessionStart, UserPromptSubmit, PreInvocation): só anota onde está o
+	// transcript da sessão, para o histórico no celular. Nada a decidir; o Antigravity exige um JSON.
+	if recordTranscript(os.Getenv("LICH_SESSION_ID"), payload) {
+		if bytes.Contains(payload, []byte(`"hookEventName"`)) {
+			os.Stdout.WriteString("{}")
+		}
+		return 0
+	}
 	decided := postHook(payload)
 	if !decided && bytes.Contains(payload, []byte(`"hookEventName"`)) {
 		os.Stdout.WriteString(agyAsk)

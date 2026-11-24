@@ -140,12 +140,57 @@ function sessionCard(s) {
       act(e.target, async () => { await api('/api/close', { session: s.id, removeWorktree: false }); openSessions.delete(s.id); });
     },
   }, 'Fechar sessão');
-  const hist = ((state.history || {})[s.id] || []).slice().reverse().map((e) =>
-    h('div', { class: 'entry' },
-      h('div', { class: 'mute' }, 'você · há ' + ago(e.at) + ' · ' + (e.status === 'pending' ? 'aguardando resposta…' : e.status)),
-      h('div', {}, e.prompt), e.answer ? h('pre', {}, e.answer) : null));
-  return h('div', { class: 'card' }, head, h('div', { style: 'margin-top:10px' }, ta), h('div', { class: 'actions' }, sendBtn, closeBtn), ...hist);
+  const followed = !!(state.follow || {})[s.id];
+  const followBtn = h('button', {
+    class: 'ghost',
+    onclick: (e) => act(e.target, () => api('/api/follow', { session: s.id, on: !followed })),
+  }, followed ? '🔕 Deixar de acompanhar' : '🔔 Acompanhar');
+  const waitingPhone = ((state.history || {})[s.id] || []).filter((e) => e.status === 'pending').length;
+  return h('div', { class: 'card' }, head, chatView(s.id),
+    waitingPhone ? h('div', { class: 'mute' }, '⏳ aguardando a resposta de ' + waitingPhone + ' tarefa(s) enviada(s) daqui') : null,
+    h('div', { style: 'margin-top:10px' }, ta), h('div', { class: 'actions' }, sendBtn, followBtn, closeBtn));
 }
+
+// ---------- histórico (lido do transcript da sessão no PC) ----------
+
+const chats = {}; // sessão -> { total, msgs, error, stick }
+
+function chatView(sid) {
+  const c = chats[sid];
+  if (!c) { loadHistory(sid); return h('div', { class: 'chat mute' }, 'carregando o histórico…'); }
+  const box = h('div', { class: 'chat' },
+    c.error && !c.msgs.length ? h('div', { class: 'mute' }, c.error) : null,
+    c.from > 0 ? h('div', { class: 'mute center' }, '… ' + c.from + ' mensagens anteriores') : null,
+    ...c.msgs.map((m) => h('div', { class: 'msg ' + m.role, title: m.at ? new Date(m.at).toLocaleString() : '' }, m.role === 'tool' ? '🔧 ' + m.text : m.text)));
+  box.addEventListener('scroll', () => { c.stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 30; });
+  requestAnimationFrame(() => { if (c.stick !== false) box.scrollTop = box.scrollHeight; else if (c.top != null) box.scrollTop = c.top; });
+  box.addEventListener('scroll', () => { c.top = box.scrollTop; });
+  return box;
+}
+
+const loading = new Set();
+async function loadHistory(sid) {
+  if (loading.has(sid)) return;
+  loading.add(sid);
+  try { await fetchHistory(sid); } finally { loading.delete(sid); }
+}
+
+async function fetchHistory(sid) {
+  const c = chats[sid];
+  const from = c ? c.from + c.msgs.length : -1;
+  try {
+    const r = await api('/api/history?session=' + encodeURIComponent(sid) + '&from=' + from);
+    if (!c || r.from !== from) chats[sid] = { total: r.total, from: r.from, msgs: r.messages, error: r.error, stick: c?.stick };
+    else if (r.messages.length) { c.msgs.push(...r.messages); c.total = r.total; }
+    else return; // nada novo: não redesenha
+    render();
+  } catch (e) {
+    chats[sid] = { total: 0, from: 0, msgs: [], error: e.message };
+  }
+}
+
+// ponytail: polling de 2,5 s só das sessões abertas na tela; trocar por SSE se a latência importar.
+setInterval(() => { if (!document.hidden) openSessions.forEach(loadHistory); }, 2500);
 
 // ---------- tela ----------
 

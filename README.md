@@ -82,6 +82,13 @@ se a extensão não estiver rodando, ele sai na hora sem saída e o diálogo nor
 - **Confiança da pasta:** uma sessão Claude aberta pelo celular marca o projeto como confiável no `~/.claude.json`
   antes de abrir (os worktrees em `.worktrees/` herdam). Já o "Hooks need review" do Codex não tem como ser
   respondido daqui: a API de extensões não aperta teclas. Ele só volta quando algum hook muda.
+- **Histórico:** ao abrir uma sessão no celular aparece a conversa inteira, inclusive o que foi escrito no PC
+  (atualiza a cada 2,5 s). Vem do transcript de cada agente: Claude e opencode pelo `lich.db`; Codex e
+  Antigravity pelo `transcripts.json` que o hook grava no início de cada conversa. Para isso, registre o
+  `remoto.exe hook` também em `SessionStart` e `UserPromptSubmit` no `~/.codex/hooks.json`, e em
+  `PreInvocation` no plugin do Antigravity. Sessões abertas antes disso mostram o histórico a partir do próximo prompt.
+- **Acompanhar:** no celular (botão na sessão) ou na tela da extensão no lich. A sessão acompanhada avisa no
+  celular quando termina um turno, com o começo da resposta, e quando fica aguardando.
 - O lich recusa mandar texto para uma sessão que está aguardando: responda a pendência primeiro.
 - A lista atualiza a cada 2s (polling no `sessions.list`).
 - O histórico de tarefas fica só na memória (as últimas 20 por sessão) e some quando a extensão reinicia.

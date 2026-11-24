@@ -46,6 +46,7 @@ type Config struct {
 	VapidPub  string                 `json:"vapidPub"`
 	VapidPriv string                 `json:"vapidPriv"`
 	Subs      []webpush.Subscription `json:"subs"`
+	Follow    map[string]bool        `json:"follow,omitempty"` // sessões acompanhadas: notificação ao terminar
 }
 
 type Entry struct {
@@ -174,6 +175,7 @@ func (a *App) saveConfigLocked() {
 
 type snapshot struct {
 	Remote   bool                `json:"remote"`
+	Follow   map[string]bool     `json:"follow"`
 	TS       TSInfo              `json:"tailscale"`
 	Projects []extension.Project `json:"projects"`
 	Sessions []extension.Session `json:"sessions"`
@@ -187,7 +189,7 @@ func (a *App) snapshotLocked() []byte {
 		p = append(p, x)
 	}
 	sort.Slice(p, func(i, j int) bool { return p[i].At < p[j].At || p[i].At == p[j].At && p[i].ID < p[j].ID })
-	b, _ := json.Marshal(snapshot{a.cfg.Remote, a.ts, a.projects, a.sessions, a.history, p})
+	b, _ := json.Marshal(snapshot{a.cfg.Remote, a.cfg.Follow, a.ts, a.projects, a.sessions, a.history, p})
 	return b
 }
 
@@ -235,12 +237,17 @@ func (a *App) poll() {
 			remote := a.cfg.Remote
 			a.mu.Unlock()
 			for _, s := range ss {
-				if remote && s.State == "waiting" && prev[s.ID] != "waiting" {
+				followed := a.followed(s.ID)
+				if (remote || followed) && s.State == "waiting" && prev[s.ID] != "waiting" {
 					body := s.Reason
 					if body == "" {
 						body = s.Detail
 					}
 					a.push("⏳ "+s.Label+" aguardando", body, "s-"+s.ID)
+				}
+				// Sessão acompanhada que terminou o turno: a última resposta do agente vai no push.
+				if followed && s.State == "done" && prev[s.ID] == "busy" {
+					go a.pushDone(s)
 				}
 				prev[s.ID] = s.State
 			}
@@ -405,7 +412,7 @@ func (a *App) setRemote(on bool) {
 
 func (a *App) push(title, body, tag string) {
 	if len(body) > 300 {
-		body = body[:300] + "…"
+		body = strings.ToValidUTF8(body[:300], "") + "…"
 	}
 	payload, _ := json.Marshal(map[string]string{"title": title, "body": body, "tag": tag})
 	a.mu.Lock()
@@ -490,6 +497,29 @@ func (a *App) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/test-push", func(w http.ResponseWriter, r *http.Request) {
 		a.push("🔔 lich remoto", "Notificações funcionando.", "test")
 		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("GET /api/history", func(w http.ResponseWriter, r *http.Request) {
+		sid := r.URL.Query().Get("session")
+		msgs, err := History(sid, a.kindOf(sid))
+		if err != nil {
+			writeJSON(w, map[string]any{"total": 0, "from": 0, "messages": []Msg{}, "error": err.Error()})
+			return
+		}
+		from, err := strconv.Atoi(r.URL.Query().Get("from"))
+		if err != nil || from < 0 || from > len(msgs) {
+			from = max(0, len(msgs)-200) // primeira carga: as últimas 200
+		}
+		writeJSON(w, map[string]any{"total": len(msgs), "from": from, "messages": msgs[from:]})
+	})
+	mux.HandleFunc("POST /api/follow", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Session string
+			On      bool
+		}
+		if readJSON(w, r, &in) && in.Session != "" {
+			a.setFollow(in.Session, in.On)
+			writeJSON(w, map[string]bool{"ok": true})
+		}
 	})
 	mux.HandleFunc("POST /api/remote", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ On bool }
@@ -646,4 +676,52 @@ func (a *App) serveLoopback(mux *http.ServeMux) {
 	})
 	log.Print("loopback em 127.0.0.1:" + strconv.Itoa(port))
 	log.Print(http.Serve(ln, h))
+}
+
+// ---------- acompanhar ----------
+
+func (a *App) followed(id string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.cfg.Follow[id]
+}
+
+func (a *App) setFollow(id string, on bool) {
+	a.mu.Lock()
+	if a.cfg.Follow == nil {
+		a.cfg.Follow = map[string]bool{}
+	}
+	if on {
+		a.cfg.Follow[id] = true
+	} else {
+		delete(a.cfg.Follow, id)
+	}
+	a.saveConfigLocked()
+	a.mu.Unlock()
+	a.changed()
+}
+
+func (a *App) kindOf(id string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, s := range a.sessions {
+		if s.ID == id {
+			return s.Kind
+		}
+	}
+	return ""
+}
+
+// pushDone avisa que uma sessão acompanhada terminou, com o começo da última resposta do agente.
+func (a *App) pushDone(s extension.Session) {
+	body := ""
+	if msgs, err := History(s.ID, s.Kind); err == nil {
+		for i := len(msgs) - 1; i >= 0; i-- {
+			if msgs[i].Role == "assistant" {
+				body = msgs[i].Text
+				break
+			}
+		}
+	}
+	a.push("✅ "+s.Label+" terminou", body, "d-"+s.ID)
 }
