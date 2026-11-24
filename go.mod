@@ -5,6 +5,7 @@ go 1.27.4
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/lichdotdev/lich/extension v0.3.0
+	modernc.org/sqlite v1.63.0
 	tailscale.com v1.106.0
 )
 
@@ -61,5 +62,4 @@ require (
 	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	modernc.org/sqlite v1.63.0 // indirect
 )
