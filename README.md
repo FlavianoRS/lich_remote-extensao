@@ -25,6 +25,11 @@ O PWA permite:
 
 ## Instalar
 
+Pelo GitHub (recebe atualizações sozinho): no lich, **Settings › Extensions › Install from… › From GitHub** com
+`https://github.com/FlavianoRS/lich_remote-extensao`. Só Windows amd64. Depois siga do passo 3.
+
+Ou de uma pasta local:
+
 1. Compilar (ou usar `dist/remoto` já pronto):
    ```
    go build -trimpath -ldflags="-s -w" -o remoto.exe .
@@ -80,3 +85,10 @@ se a extensão não estiver rodando, ele sai na hora sem saída e o diálogo nor
 - O lich recusa mandar texto para uma sessão que está aguardando: responda a pendência primeiro.
 - A lista atualiza a cada 2s (polling no `sessions.list`).
 - O histórico de tarefas fica só na memória (as últimas 20 por sessão) e some quando a extensão reinicia.
+
+## Publicar uma versão
+
+1. Suba `version` no `manifest.json` e faça commit.
+2. Monte `release/remoto_windows_amd64.tar.gz` (`manifest.json`, `remoto.exe` e `opencode/remoto.js` na raiz) e
+   `release/checksums.txt` (`<sha256>  <arquivo>`), e confira com `lich extension check release/remoto_windows_amd64.tar.gz`.
+3. Crie a tag `vX.Y.Z` e a release no GitHub com os dois arquivos.
