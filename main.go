@@ -460,7 +460,12 @@ func (a *App) push(title, body, tag string) {
 func (a *App) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	static, _ := fs.Sub(webFS, "web")
-	mux.Handle("GET /", http.FileServerFS(static))
+	// no-cache: o celular revalida a cada abertura e pega o PWA novo logo após um Update da extensão.
+	files := http.FileServerFS(static)
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		files.ServeHTTP(w, r)
+	})
 	mux.HandleFunc("GET /icon-192.png", serveIcon)
 	mux.HandleFunc("GET /icon-512.png", serveIcon)
 

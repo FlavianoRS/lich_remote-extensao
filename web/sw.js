@@ -1,4 +1,4 @@
-const CACHE = 'remoto-v1';
+const CACHE = 'remoto-v2';
 const SHELL = ['/', '/app.js', '/app.css', '/manifest.webmanifest', '/icon-192.png'];
 
 self.addEventListener('install', (e) => {
@@ -12,7 +12,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.pathname.startsWith('/api/')) return;
-  e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+  e.respondWith(fetch(e.request, { cache: 'no-cache' }).catch(() => caches.match(e.request)));
 });
 
 self.addEventListener('push', (e) => {
