@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0f766e">
 <title>lich remoto</title>
 <link rel="manifest" href="/manifest.webmanifest">
@@ -11,17 +11,37 @@
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-<header>
-  <h1>lich remoto</h1>
-  <span id="conn" class="dot" title="conexão"></span>
-  <label class="switch"><input type="checkbox" id="remote"><span>Modo remoto</span></label>
-</header>
-<div id="banner" hidden></div>
-<main id="app"></main>
-<footer>
-  <button id="btn-new">+ Nova sessão</button>
-  <button id="btn-push" class="ghost">Ativar notificações</button>
-</footer>
+<div id="shell">
+  <aside id="drawer">
+    <header class="bar">
+      <h1>lich remoto</h1>
+      <span id="conn" class="dot" title="conexão com o PC"></span>
+      <button id="btn-new" class="icon" title="Nova sessão" aria-label="Nova sessão">＋</button>
+    </header>
+    <div id="notes"></div>
+    <nav id="list" aria-label="Sessões"></nav>
+    <footer class="drawer-foot">
+      <label class="switch"><input type="checkbox" id="remote"><span>Modo remoto</span></label>
+      <button id="btn-push" class="ghost small">Ativar notificações</button>
+    </footer>
+  </aside>
+  <div id="scrim"></div>
+  <section id="chat">
+    <header class="bar" id="chat-head">
+      <button id="btn-menu" class="icon" title="Sessões" aria-label="Sessões">☰</button>
+      <div id="head-info" class="grow"></div>
+      <button id="btn-follow" class="icon" hidden></button>
+      <button id="btn-close" class="icon" title="Fechar sessão" aria-label="Fechar sessão" hidden>✕</button>
+    </header>
+    <div id="elsewhere" hidden></div>
+    <div id="banner" hidden></div>
+    <main id="msgs"></main>
+    <form id="composer" hidden>
+      <textarea id="input" rows="1" placeholder="Mensagem"></textarea>
+      <button id="btn-send" class="send" aria-label="Enviar" disabled>➤</button>
+    </form>
+  </section>
+</div>
 <dialog id="dlg-new">
   <form id="form-new" method="dialog">
     <h2>Nova sessão</h2>

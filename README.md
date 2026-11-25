@@ -6,8 +6,10 @@ ligado com o lich aberto e o app Tailscale ativo no celular.
 
 O PWA permite:
 
-- ver as sessões por projeto e o estado de cada uma (aguardando, trabalhando, pronto)
-- mandar uma tarefa para uma sessão e ler a resposta
+- ver as sessões numa lista lateral, como num app de conversa: estado, prévia da última mensagem, contador de
+  não lidas e de pendências
+- abrir uma sessão e conversar com ela num chat com o histórico inteiro (inclusive o que foi escrito no PC),
+  com perguntas e permissões aparecendo dentro da conversa
 - abrir uma sessão nova (Claude, Codex, opencode ou Antigravity, com worktree opcional)
 - fechar uma sessão (via `lich close`, sempre mantendo o worktree)
 - responder pelo celular as perguntas (`AskUserQuestion`) e as permissões do Claude Code, com notificação push

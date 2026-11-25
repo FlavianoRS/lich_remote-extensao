@@ -1,4 +1,4 @@
-const CACHE = 'remoto-v2';
+const CACHE = 'remoto-v3';
 const SHELL = ['/', '/app.js', '/app.css', '/manifest.webmanifest', '/icon-192.png'];
 
 self.addEventListener('install', (e) => {

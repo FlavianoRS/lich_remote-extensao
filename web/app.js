@@ -2,12 +2,19 @@
 // Tudo que vem do agente é texto: o DOM é montado com textContent, nunca innerHTML.
 
 let state = null;
+let prevSessions = {};       // sessão -> assinatura do último snapshot (para saber quem mudou)
+let active = null;           // sessão aberta no chat
 let dirty = false;
-const openSessions = new Set();
-const drafts = {};          // sessão -> texto sendo digitado
-const picks = {};           // pendência -> { pergunta -> Set(rótulos) }
-const others = {};          // pendência -> { pergunta -> texto livre }
+const drafts = {};           // sessão -> texto sendo digitado
+const picks = {};            // pendência -> { pergunta -> Set(rótulos) }
+const others = {};           // pendência -> { pergunta -> texto livre }
+const chats = {};            // sessão -> { total, from, msgs, error }
 const $ = (s) => document.querySelector(s);
+
+// Quantas mensagens de cada sessão já foram vistas (para o contador de não lidas). Só conveniência local.
+const seen = (() => { try { return JSON.parse(localStorage.getItem('seen') || '{}'); } catch { return {}; } })();
+const saveSeen = () => { try { localStorage.setItem('seen', JSON.stringify(seen)); } catch {} };
+try { active = localStorage.getItem('active'); } catch {}
 
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
@@ -46,17 +53,40 @@ const ago = (t) => {
   const s = Math.max(0, Math.floor(Date.now() / 1000 - t));
   return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'min' : Math.floor(s / 3600) + 'h';
 };
-const stateName = { waiting: 'aguardando', busy: 'trabalhando', done: 'pronto', '': '—' };
+const hhmm = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const stateName = { waiting: 'aguardando', busy: 'trabalhando', done: 'pronto' };
+const sessionById = (id) => (state?.sessions || []).find((s) => s.id === id);
+const pendingOf = (id) => (state?.pending || []).filter((p) => p.session === id);
+const title = (s) => s.label + (s.name ? ' · ' + s.name : '');
+const avatar = (s, small) => h('div', { class: 'avatar ' + (s.kind || '') + (small ? ' small' : ''), 'aria-hidden': 'true' },
+  (s.kind || s.label || '?')[0].toUpperCase(), h('i', { class: s.state || '' }));
 
-// ---------- pendências (perguntas e permissões) ----------
+// Markdown mínimo da resposta (blocos ```, `código`, **negrito**, títulos), montado como DOM, sem HTML.
+function md(text) {
+  return text.split(/```[^\n]*\n?/).flatMap((part, i) => (i % 2 ? [h('pre', {}, part.replace(/\n$/, ''))] : inline(part)));
+}
+function inline(t) {
+  t = t.replace(/^#{1,6}\s+(.+)$/gm, '**$1**');
+  const out = [], re = /\*\*([^*\n]+)\*\*|`([^`\n]+)`/g;
+  let last = 0, m;
+  while ((m = re.exec(t))) {
+    if (m.index > last) out.push(t.slice(last, m.index));
+    out.push(m[1] !== undefined ? h('b', {}, m[1]) : h('code', {}, m[2]));
+    last = re.lastIndex;
+  }
+  out.push(t.slice(last));
+  return out;
+}
+
+// ---------- pendências (perguntas e permissões), dentro do chat da sessão ----------
 
 function pendingCard(p) {
   const head = h('div', { class: 'row' },
     h('div', { class: 'grow' }, h('div', { class: 'title' }, p.kind === 'question' ? '❓ Pergunta' : '🔐 Permissão'),
-      h('div', { class: 'mute' }, p.label + ' · há ' + ago(p.at))));
+      h('div', { class: 'mute' }, 'há ' + ago(p.at))));
   const toPC = h('button', { class: 'ghost', onclick: (e) => act(e.target, () => api('/api/reply', { id: p.id, action: 'pc' })) }, 'Responder no PC');
-  if (p.kind === 'permission') return h('div', { class: 'card pending' }, head, permissionBody(p), permissionActions(p, toPC));
-  return h('div', { class: 'card pending' }, head, ...questionBody(p, toPC));
+  if (p.kind === 'permission') return h('div', { class: 'card' }, head, permissionBody(p), permissionActions(p, toPC));
+  return h('div', { class: 'card' }, head, ...questionBody(p, toPC));
 }
 
 function permissionBody(p) {
@@ -103,7 +133,7 @@ function questionBody(p, toPC) {
     const other = h('input', { placeholder: 'Outra resposta…', value: txt[q.question] || '' });
     other.addEventListener('input', () => { txt[q.question] = other.value; refresh(); });
     return h('div', { style: 'margin-top:10px' },
-      q.header ? h('span', { class: 'badge none' }, q.header) : null,
+      q.header ? h('span', { class: 'badge' }, q.header) : null,
       h('div', { class: 'title', style: 'margin-top:6px' }, q.question + (q.multiSelect ? ' (várias)' : '')),
       h('div', {}, ...opts), h('div', { style: 'margin-top:6px' }, other));
   });
@@ -111,116 +141,225 @@ function questionBody(p, toPC) {
   return [...blocks, h('div', { class: 'actions' }, send, toPC)];
 }
 
-// ---------- sessões ----------
-
-function sessionCard(s) {
-  const isOpen = openSessions.has(s.id);
-  const st = s.state || '';
-  const line = s.reason || s.detail || s.tool || '';
-  const head = h('div', { class: 'row', style: 'cursor:pointer', onclick: () => { isOpen ? openSessions.delete(s.id) : openSessions.add(s.id); render(true); } },
-    h('div', { class: 'grow' },
-      h('div', { class: 'title ellipsis' }, s.label + (s.name ? ' · ' + s.name : '')),
-      h('div', { class: 'mute ellipsis' }, s.kind + (line ? ' · ' + line : ''))),
-    h('span', { class: 'badge ' + (st || 'none') }, stateName[st] ?? st));
-  if (!isOpen) return h('div', { class: 'card' }, head);
-
-  const ta = h('textarea', { rows: 3, placeholder: st === 'waiting' ? 'A sessão está aguardando uma resposta no PC' : 'Tarefa para ' + s.label });
-  ta.value = drafts[s.id] || '';
-  ta.addEventListener('input', () => (drafts[s.id] = ta.value));
-  const sendBtn = h('button', {
-    onclick: (e) => act(e.target, async () => {
-      await api('/api/send', { session: s.id, prompt: ta.value });
-      drafts[s.id] = ''; ta.value = '';
-    }),
-  }, 'Enviar');
-  const closeBtn = h('button', {
-    class: 'ghost',
-    onclick: (e) => {
-      if (!confirm('Fechar ' + s.label + '? O worktree é mantido.')) return;
-      act(e.target, async () => { await api('/api/close', { session: s.id, removeWorktree: false }); openSessions.delete(s.id); });
-    },
-  }, 'Fechar sessão');
-  const followed = !!(state.follow || {})[s.id];
-  const followBtn = h('button', {
-    class: 'ghost',
-    onclick: (e) => act(e.target, () => api('/api/follow', { session: s.id, on: !followed })),
-  }, followed ? '🔕 Deixar de acompanhar' : '🔔 Acompanhar');
-  const waitingPhone = ((state.history || {})[s.id] || []).filter((e) => e.status === 'pending').length;
-  return h('div', { class: 'card' }, head, chatView(s.id),
-    waitingPhone ? h('div', { class: 'mute' }, '⏳ aguardando a resposta de ' + waitingPhone + ' tarefa(s) enviada(s) daqui') : null,
-    h('div', { style: 'margin-top:10px' }, ta), h('div', { class: 'actions' }, sendBtn, followBtn, closeBtn));
-}
-
 // ---------- histórico (lido do transcript da sessão no PC) ----------
 
-const chats = {}; // sessão -> { total, msgs, error, stick }
-
-function chatView(sid) {
-  const c = chats[sid];
-  if (!c) { loadHistory(sid); return h('div', { class: 'chat mute' }, 'carregando o histórico…'); }
-  const box = h('div', { class: 'chat' },
-    c.error && !c.msgs.length ? h('div', { class: 'mute' }, c.error) : null,
-    c.from > 0 ? h('div', { class: 'mute center' }, '… ' + c.from + ' mensagens anteriores') : null,
-    ...c.msgs.map((m) => h('div', { class: 'msg ' + m.role, title: m.at ? new Date(m.at).toLocaleString() : '' }, m.role === 'tool' ? '🔧 ' + m.text : m.text)));
-  box.addEventListener('scroll', () => { c.stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 30; });
-  requestAnimationFrame(() => { if (c.stick !== false) box.scrollTop = box.scrollHeight; else if (c.top != null) box.scrollTop = c.top; });
-  box.addEventListener('scroll', () => { c.top = box.scrollTop; });
-  return box;
-}
-
 const loading = new Set();
-async function loadHistory(sid) {
+async function loadHistory(sid, older) {
   if (loading.has(sid)) return;
   loading.add(sid);
-  try { await fetchHistory(sid); } finally { loading.delete(sid); }
+  try { await fetchHistory(sid, older); } finally { loading.delete(sid); }
 }
 
-async function fetchHistory(sid) {
+async function fetchHistory(sid, older) {
   const c = chats[sid];
-  const from = c ? c.from + c.msgs.length : -1;
+  const from = older && c ? Math.max(0, c.from - 200) : c ? c.from + c.msgs.length : -1;
   try {
     const r = await api('/api/history?session=' + encodeURIComponent(sid) + '&from=' + from);
-    if (!c || r.from !== from) chats[sid] = { total: r.total, from: r.from, msgs: r.messages, error: r.error, stick: c?.stick };
+    if (!c || r.from !== from || older) chats[sid] = { total: r.total, from: r.from, msgs: r.messages, error: r.error };
     else if (r.messages.length) { c.msgs.push(...r.messages); c.total = r.total; }
     else return; // nada novo: não redesenha
+    if (seen[sid] === undefined) { seen[sid] = r.total; saveSeen(); } // primeira vez: o que já existe conta como lido
+    if (sid === active && !document.hidden) markSeen(sid);
     render();
   } catch (e) {
-    chats[sid] = { total: 0, from: 0, msgs: [], error: e.message };
+    if (!c) chats[sid] = { total: 0, from: 0, msgs: [], error: e.message };
   }
 }
 
-// ponytail: polling de 2,5 s só das sessões abertas na tela; trocar por SSE se a latência importar.
-setInterval(() => { if (!document.hidden) openSessions.forEach(loadHistory); }, 2500);
+function markSeen(sid) {
+  const c = chats[sid];
+  if (c && seen[sid] !== c.total) { seen[sid] = c.total; saveSeen(); }
+}
 
-// ---------- tela ----------
+function unread(sid) {
+  const c = chats[sid];
+  if (!c || seen[sid] === undefined) return 0;
+  return c.msgs.filter((m, i) => c.from + i >= seen[sid] && m.role === 'assistant').length;
+}
+
+// ponytail: polling de 2,5 s só da sessão aberta; as outras recarregam quando o snapshot delas muda.
+setInterval(() => { if (!document.hidden && active) loadHistory(active); }, 2500);
+
+// ---------- lista de sessões ----------
+
+function preview(s) {
+  const p = pendingOf(s.id);
+  if (p.length) return { text: p[0].kind === 'question' ? '❓ ' + 'Pergunta aguardando' : '🔐 Permissão: ' + p[0].tool, alert: true };
+  const c = chats[s.id];
+  const last = c && [...c.msgs].reverse().find((m) => m.role !== 'tool');
+  if (s.state === 'busy') return { text: s.tool ? '🔧 ' + s.tool + '…' : 'trabalhando…' };
+  if (last) return { text: (last.role === 'user' ? 'Você: ' : '') + last.text.replace(/\s+/g, ' ').slice(0, 140), at: last.at };
+  return { text: s.reason || s.detail || stateName[s.state] || s.kind };
+}
+
+function sessionItem(s) {
+  const pv = preview(s);
+  const n = pendingOf(s.id).length;
+  const u = s.id === active ? 0 : unread(s.id);
+  return h('button', { class: 'item' + (s.id === active ? ' active' : ''), onclick: () => select(s.id) },
+    avatar(s),
+    h('div', { class: 'grow' },
+      h('div', { class: 'top' }, h('span', { class: 'name' }, title(s)), pv.at ? h('span', { class: 'when' }, hhmm(pv.at)) : null),
+      h('div', { class: 'bottom' }, h('span', { class: 'preview' + (pv.alert ? ' alert' : '') }, pv.text),
+        n ? h('span', { class: 'count alert' }, n) : u ? h('span', { class: 'count' }, u) : null)));
+}
+
+function renderList() {
+  const byProject = {};
+  for (const s of state.sessions || []) (byProject[s.project] ||= []).push(s);
+  const order = { waiting: 1, busy: 2, done: 3 };
+  const rank = (s) => (pendingOf(s.id).length ? 0 : order[s.state] ?? 4);
+  const kids = [];
+  const projects = Object.keys(byProject).sort();
+  for (const proj of projects) {
+    const list = byProject[proj].sort((x, y) => rank(x) - rank(y) || x.label.localeCompare(y.label, undefined, { numeric: true }));
+    if (projects.length > 1) kids.push(h('div', { class: 'proj' }, proj));
+    kids.push(...list.map(sessionItem));
+  }
+  if (!kids.length) kids.push(h('div', { class: 'empty' }, 'Nenhuma sessão aberta no lich.'));
+  $('#list').replaceChildren(...kids);
+
+  const ts = state.tailscale || {};
+  $('#notes').replaceChildren(
+    ts.warn ? h('div', { class: 'note' }, '⚠ ' + ts.warn) : '',
+    state.remote ? '' : h('div', { class: 'note' }, 'Modo remoto desligado: perguntas e permissões aparecem só no PC.'));
+}
+
+// ---------- chat ----------
+
+function renderHead(s) {
+  const followBtn = $('#btn-follow'), closeBtn = $('#btn-close');
+  followBtn.hidden = closeBtn.hidden = !s;
+  if (!s) { $('#head-info').replaceChildren(h('div', { class: 't' }, 'lich remoto')); return; }
+  const followed = !!(state.follow || {})[s.id];
+  followBtn.textContent = followed ? '🔔' : '🔕';
+  followBtn.title = followed ? 'Acompanhando: avisa ao terminar. Toque para parar.' : 'Acompanhar: avisar no celular quando terminar';
+  followBtn.setAttribute('aria-label', followBtn.title);
+  const sub = [stateName[s.state] || '—', s.state === 'busy' && s.tool ? s.tool : '', s.kind, s.project].filter(Boolean).join(' · ');
+  $('#head-info').replaceChildren(avatar(s, true), h('div', { class: 'grow' }, h('div', { class: 't' }, title(s)), h('div', { class: 's' }, sub)));
+}
+
+function renderMsgs(s) {
+  const box = $('#msgs');
+  if (!s) {
+    box.replaceChildren(h('div', { class: 'empty' }, (state.sessions || []).length ? 'Escolha uma sessão na lista' : 'Nenhuma sessão aberta no lich.\nUse ＋ para abrir uma.'));
+    return;
+  }
+  const c = chats[s.id];
+  const kids = [];
+  if (!c) { kids.push(h('div', { class: 'sys' }, 'carregando o histórico…')); loadHistory(s.id); }
+  else {
+    if (c.from > 0) kids.push(h('button', { class: 'more', onclick: (e) => act(e.target, () => loadHistory(s.id, true)) }, 'Carregar anteriores (' + c.from + ')'));
+    if (c.error && !c.msgs.length) kids.push(h('div', { class: 'sys' }, c.error));
+    else if (!c.msgs.length) kids.push(h('div', { class: 'sys' }, 'Sem mensagens ainda.'));
+    for (const m of c.msgs) {
+      if (m.role === 'tool') kids.push(h('div', { class: 'msg tool', onclick: (e) => e.currentTarget.classList.toggle('open') }, '🔧 ' + m.text));
+      else kids.push(h('div', { class: 'msg ' + m.role }, m.role === 'assistant' ? md(m.text) : m.text, m.at ? h('time', {}, hhmm(m.at)) : null));
+    }
+  }
+  const waitingPhone = ((state.history || {})[s.id] || []).filter((e) => e.status === 'pending').length;
+  if (waitingPhone) kids.push(h('div', { class: 'sys' }, '⏳ aguardando a resposta de ' + waitingPhone + ' tarefa(s) enviada(s) daqui'));
+  if (s.state === 'busy') kids.push(h('div', { class: 'sys' }, 'trabalhando' + (s.tool ? ' · ' + s.tool : '') + '…'));
+  kids.push(...pendingOf(s.id).map(pendingCard));
+
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  const switched = box.dataset.sid !== s.id;
+  const top = box.scrollTop, oldH = box.scrollHeight;
+  const grewUp = !switched && c && Number(box.dataset.from) > c.from; // "Carregar anteriores": mantém a mesma mensagem na tela
+  box.replaceChildren(...kids);
+  box.dataset.sid = s.id;
+  box.dataset.from = c ? c.from : '';
+  box.scrollTop = grewUp ? top + box.scrollHeight - oldH : atBottom || switched ? box.scrollHeight : top;
+}
+
+function renderComposer(s) {
+  const f = $('#composer'), ta = $('#input');
+  f.hidden = !s;
+  if (!s) return;
+  ta.placeholder = s.state === 'waiting' && !pendingOf(s.id).length ? 'A sessão aguarda uma resposta no PC' : 'Mensagem para ' + s.label;
+  $('#btn-send').disabled = !ta.value.trim();
+}
+
+function renderElsewhere() {
+  const el = $('#elsewhere');
+  const p = (state.pending || []).find((x) => x.session !== active);
+  el.hidden = !p;
+  if (p) { el.textContent = (p.kind === 'question' ? '❓ ' : '🔐 ') + p.label + (p.kind === 'question' ? ' pergunta' : ' pede permissão') + ' · abrir'; el.onclick = () => select(p.session); }
+}
 
 function render(force) {
   if (!state) return;
-  const a = document.activeElement;
-  if (!force && a && $('#app').contains(a) && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) { dirty = true; return; }
-  dirty = false;
   $('#remote').checked = !!state.remote;
-  const ts = state.tailscale || {};
-  const app = $('#app');
-  const kids = [];
-  if (ts.warn) kids.push(h('div', { class: 'card mute' }, '⚠ ' + ts.warn));
-  if (!state.remote) kids.push(h('div', { class: 'card mute' }, 'Modo remoto desligado: perguntas e permissões aparecem só no PC. Ligue no topo para recebê-las aqui.'));
-  if (state.pending && state.pending.length) {
-    kids.push(h('h2', {}, 'Aguardando você'), ...state.pending.map(pendingCard));
-  }
-  const byProject = {};
-  for (const s of state.sessions || []) (byProject[s.project] ||= []).push(s);
-  const order = { waiting: 0, busy: 1, done: 2 };
-  for (const [proj, list] of Object.entries(byProject).sort()) {
-    list.sort((x, y) => (order[x.state] ?? 3) - (order[y.state] ?? 3) || x.label.localeCompare(y.label));
-    kids.push(h('h2', {}, proj), ...list.map(sessionCard));
-  }
-  if (!(state.sessions || []).length) kids.push(h('div', { class: 'empty' }, 'Nenhuma sessão aberta no lich.'));
-  app.replaceChildren(...kids);
+  renderList();
+  if (active && !sessionById(active)) setActive(null);
+  const s = sessionById(active);
+  renderHead(s);
+  renderComposer(s);
+  renderElsewhere();
+  // Não redesenha o chat enquanto um campo de uma pendência está em edição (perderia o foco).
+  const a = document.activeElement;
+  if (!force && a && $('#msgs').contains(a) && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) { dirty = true; return; }
+  dirty = false;
+  renderMsgs(s);
+}
+
+function setActive(sid) {
+  active = sid;
+  try { sid ? localStorage.setItem('active', sid) : localStorage.removeItem('active'); } catch {}
+}
+
+function select(sid) {
+  if (active) drafts[active] = $('#input').value;
+  setActive(sid);
+  const ta = $('#input');
+  ta.value = drafts[sid] || '';
+  autosize();
+  document.body.classList.remove('drawer');
+  markSeen(sid);
+  loadHistory(sid);
+  render(true);
 }
 
 document.addEventListener('focusout', () => setTimeout(() => dirty && render(), 0));
+document.addEventListener('visibilitychange', () => { if (!document.hidden && active) { markSeen(active); loadHistory(active); } });
 
+// ---------- composer ----------
+
+function autosize() {
+  const ta = $('#input');
+  ta.style.height = '';
+  if (ta.value && ta.offsetParent) ta.style.height = Math.min(ta.scrollHeight + 2, 152) + 'px';
+}
+$('#input').addEventListener('input', () => { autosize(); $('#btn-send').disabled = !$('#input').value.trim(); if (active) drafts[active] = $('#input').value; });
+// Enter envia no teclado físico; no celular o Enter quebra linha e o envio é pelo botão.
+$('#input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && matchMedia('(pointer: fine)').matches) { e.preventDefault(); $('#composer').requestSubmit(); }
+});
+$('#composer').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const ta = $('#input'), sid = active, text = ta.value.trim();
+  if (!sid || !text) return;
+  act($('#btn-send'), async () => {
+    await api('/api/send', { session: sid, prompt: text });
+    drafts[sid] = '';
+    if (active === sid) { ta.value = ''; autosize(); }
+    loadHistory(sid);
+  });
+});
+
+// ---------- cabeçalho e gaveta ----------
+
+$('#btn-menu').addEventListener('click', () => document.body.classList.add('drawer'));
+$('#scrim').addEventListener('click', () => document.body.classList.remove('drawer'));
+$('#btn-follow').addEventListener('click', (e) => {
+  const followed = !!(state.follow || {})[active];
+  act(e.currentTarget, () => api('/api/follow', { session: active, on: !followed }));
+});
+$('#btn-close').addEventListener('click', (e) => {
+  const s = sessionById(active);
+  if (!s || !confirm('Fechar ' + s.label + '? O worktree é mantido.')) return;
+  act(e.currentTarget, async () => { await api('/api/close', { session: s.id, removeWorktree: false }); setActive(null); render(true); });
+});
 $('#remote').addEventListener('change', (e) => act(e.target, () => api('/api/remote', { on: e.target.checked })));
 
 $('#btn-new').addEventListener('click', () => {
@@ -230,9 +369,8 @@ $('#btn-new').addEventListener('click', () => {
 });
 $('#form-new').addEventListener('submit', (e) => {
   if (e.submitter?.value !== 'ok') return;
-  const f = new FormData(e.target);
-  const body = Object.fromEntries(f.entries());
-  api('/api/open', body).then((o) => { openSessions.add(o.id); toast('Sessão ' + o.label + ' aberta'); e.target.reset(); }).catch((err) => toast(err.message));
+  const body = Object.fromEntries(new FormData(e.target).entries());
+  api('/api/open', body).then((o) => { e.target.reset(); select(o.id); }).catch((err) => toast(err.message));
 });
 
 function b64ToU8(s) {
@@ -250,10 +388,30 @@ $('#btn-push').addEventListener('click', (e) => act(e.target, async () => {
   e.target.textContent = 'Notificações ativas';
 }));
 
+// ---------- conexão ----------
+
+function onState(next) {
+  const first = !state;
+  state = next;
+  const now = {};
+  for (const s of state.sessions || []) {
+    now[s.id] = [s.state, s.tool, s.detail, s.reason].join('|');
+    // Sessão que mudou (ou toda sessão, na primeira carga) recarrega o histórico: alimenta a prévia e as não lidas.
+    if (s.id !== active && (first || prevSessions[s.id] !== now[s.id])) loadHistory(s.id);
+  }
+  prevSessions = now;
+  if (first && !sessionById(active)) {
+    setActive(null);
+    if (matchMedia('(max-width: 759px)').matches && (state.sessions || []).length) document.body.classList.add('drawer');
+  }
+  if (first && active) { $('#input').value = drafts[active] || ''; loadHistory(active); }
+  render();
+}
+
 function connect() {
   const es = new EventSource('/api/events');
   es.onopen = () => $('#conn').classList.add('on');
-  es.onmessage = (m) => { state = JSON.parse(m.data); render(); };
+  es.onmessage = (m) => onState(JSON.parse(m.data));
   es.onerror = () => $('#conn').classList.remove('on');
 }
 
