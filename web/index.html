@@ -13,48 +13,105 @@
 <body>
 <div id="shell">
   <aside id="drawer">
-    <header class="bar">
-      <h1>lich remoto</h1>
-      <span id="conn" class="dot" title="conexão com o PC"></span>
-      <button id="btn-new" class="icon" title="Nova sessão" aria-label="Nova sessão">＋</button>
-    </header>
+    <div class="drawer-header">
+      <div class="brand-wrap">
+        <div class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        </div>
+        <div class="brand-info">
+          <h1>lich remoto</h1>
+          <div class="conn-status" id="conn-indicator">
+            <span class="conn-dot offline" id="conn-dot"></span>
+            <span id="conn-text">Conectando ao PC…</span>
+          </div>
+        </div>
+      </div>
+      <button class="btn-new-session" id="btn-new" aria-label="Nova sessão">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Nova</span>
+      </button>
+    </div>
     <div id="notes"></div>
-    <nav id="list" aria-label="Sessões"></nav>
-    <footer class="drawer-foot">
-      <label class="switch"><input type="checkbox" id="remote"><span>Modo remoto</span></label>
-      <button id="btn-push" class="ghost small">Ativar notificações</button>
-    </footer>
+    <nav id="session-list" aria-label="Sessões"></nav>
+    <div class="drawer-footer">
+      <div class="switch-row">
+        <div class="switch-label-wrap">
+          <span class="switch-title">Modo remoto</span>
+          <span class="switch-desc">Permissões e perguntas pelo celular</span>
+        </div>
+        <label class="switch-control">
+          <input type="checkbox" id="switch-remote" aria-label="Modo remoto">
+          <span class="switch-slider"></span>
+        </label>
+      </div>
+      <button class="btn-push-toggle" id="btn-push">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span id="push-btn-text">Ativar notificações</span>
+      </button>
+    </div>
   </aside>
   <div id="scrim"></div>
   <section id="chat">
-    <header class="bar" id="chat-head">
-      <button id="btn-menu" class="icon" title="Sessões" aria-label="Sessões">☰</button>
-      <div id="head-info" class="grow"></div>
-      <button id="btn-follow" class="icon" hidden></button>
-      <button id="btn-close" class="icon" title="Fechar sessão" aria-label="Fechar sessão" hidden>✕</button>
+    <header id="chat-head">
+      <button class="btn-menu-drawer" id="btn-menu" aria-label="Sessões">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        <span class="drawer-alert-badge" id="menu-badge" hidden></span>
+      </button>
+      <div class="chat-head-main" id="chat-head-info"></div>
+      <div class="chat-head-actions">
+        <button class="btn-head-action" id="btn-follow" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        </button>
+        <button class="btn-head-action" id="btn-close" title="Fechar sessão" aria-label="Fechar sessão" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
     </header>
-    <div id="elsewhere" hidden></div>
-    <div id="banner" hidden></div>
-    <main id="msgs"></main>
-    <form id="composer" hidden>
-      <textarea id="input" rows="1" placeholder="Mensagem"></textarea>
-      <button id="btn-send" class="send" aria-label="Enviar" disabled>➤</button>
+    <div id="banner-elsewhere" role="button" tabindex="0" hidden></div>
+    <div id="system-banner" role="alert" hidden></div>
+    <main id="messages-container"></main>
+    <form id="composer-form" hidden>
+      <div class="composer-input-wrap">
+        <textarea id="chat-input" rows="1" placeholder="Mensagem" aria-label="Mensagem"></textarea>
+      </div>
+      <button type="submit" class="btn-send-msg" id="btn-send" disabled aria-label="Enviar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+      </button>
     </form>
   </section>
 </div>
 <dialog id="dlg-new">
-  <form id="form-new" method="dialog">
-    <h2>Nova sessão</h2>
-    <label>Projeto <select name="project" required></select></label>
-    <label>Agente
-      <select name="provider">
-        <option value="">padrão do projeto</option>
-        <option>claude</option><option>codex</option><option>opencode</option><option>antigravity</option>
+  <form id="form-new" method="dialog" class="dialog-content">
+    <div class="dialog-header">
+      <h2 class="dialog-title">Nova sessão</h2>
+      <button type="submit" value="cancel" formnovalidate class="btn-head-action" aria-label="Fechar">✕</button>
+    </div>
+    <div class="dialog-field">
+      <label for="new-project">Projeto</label>
+      <select id="new-project" name="project" required></select>
+    </div>
+    <div class="dialog-field">
+      <label for="new-provider">Agente</label>
+      <select id="new-provider" name="provider">
+        <option value="">Padrão do projeto</option>
+        <option value="claude">Claude</option>
+        <option value="codex">Codex</option>
+        <option value="opencode">opencode</option>
+        <option value="antigravity">Antigravity</option>
       </select>
-    </label>
-    <label>Worktree (branch, opcional) <input name="worktree" autocomplete="off" autocapitalize="off"></label>
-    <label>Tarefa (opcional) <textarea name="prompt" rows="4"></textarea></label>
-    <menu><button value="cancel" formnovalidate class="ghost">Cancelar</button><button value="ok">Abrir</button></menu>
+    </div>
+    <div class="dialog-field">
+      <label for="new-worktree">Worktree / branch (opcional)</label>
+      <input id="new-worktree" name="worktree" placeholder="ex.: feat/tela-nova" autocomplete="off" autocapitalize="off">
+    </div>
+    <div class="dialog-field">
+      <label for="new-prompt">Tarefa inicial (opcional)</label>
+      <textarea id="new-prompt" name="prompt" rows="3"></textarea>
+    </div>
+    <div class="dialog-footer">
+      <button type="submit" value="cancel" formnovalidate class="btn-secondary">Cancelar</button>
+      <button type="submit" value="ok" class="btn-action-primary">Abrir sessão</button>
+    </div>
   </form>
 </dialog>
 <script src="/app.js"></script>
