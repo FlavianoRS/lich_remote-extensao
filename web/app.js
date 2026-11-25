@@ -33,6 +33,7 @@ async function api(path, body) {
     headers: { 'Content-Type': 'application/json', 'X-Remoto': '1' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  if (r.status === 401) location.assign('/pair'); // pela internet (Funnel): aparelho revogado ou não pareado
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
   return j;
@@ -412,7 +413,7 @@ function connect() {
   const es = new EventSource('/api/events');
   es.onopen = () => $('#conn').classList.add('on');
   es.onmessage = (m) => onState(JSON.parse(m.data));
-  es.onerror = () => $('#conn').classList.remove('on');
+  es.onerror = () => { $('#conn').classList.remove('on'); api('/api/state').catch(() => {}); };
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');

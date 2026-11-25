@@ -17,7 +17,8 @@ O PWA permite:
 ## Segurança
 
 - Só aparelhos da **sua** conta Tailscale entram: cada requisição passa por `WhoIs` e precisa ser do mesmo usuário
-  dono do nó. Nada fica exposto na internet, e o tráfego é WireGuard ponta a ponta.
+  dono do nó. Sem o Funnel nada fica exposto na internet, e o tráfego é WireGuard ponta a ponta.
+- O **Funnel** (acesso sem Tailscale no celular) começa desligado. Ligado, só aparelhos pareados passam; veja abaixo.
 - O hook fala com a extensão só por `127.0.0.1`, com um segredo aleatório gravado em
   `%AppData%\lich\extension-data\remoto\hook.json` (lido só pelo usuário).
 - Requisições POST exigem o header `X-Remoto` (proteção contra CSRF), e a página usa CSP restritiva. Todo texto
@@ -46,6 +47,26 @@ Ou de uma pasta local:
    **Ativar notificações** (no iPhone, só depois de instalado na tela inicial, iOS 16.4 ou mais novo).
 
 Login sem navegador: salve uma auth key do Tailscale em `%AppData%\lich\extension-data\remoto\authkey`.
+
+## Acesso sem Tailscale no celular (Funnel)
+
+Opcional, para quem não pode ou não quer instalar o Tailscale no celular. O endereço é o mesmo
+(`https://lich-remoto.<sua-rede>.ts.net`), servido pela internet via
+[Tailscale Funnel](https://tailscale.com/kb/1223/funnel); a conexão continua cifrada até o PC.
+
+1. Libere o Funnel na tailnet (uma vez): no painel do Tailscale › Access controls, inclua em `nodeAttrs`
+   `{"target": ["autogroup:member"], "attr": ["funnel"]}`. HTTPS precisa estar ligado.
+2. No lich › Controle remoto, ligue **Acesso sem Tailscale (Funnel)**. Se faltar a liberação, a tela avisa e
+   tem um botão para o painel.
+3. Toque em **Parear celular**: aparece um QR e um código de 8 caracteres, válido por 5 minutos e de uso único.
+4. No celular, leia o QR (ou abra `https://…/pair` e digite o código), dê um nome ao aparelho e instale o app na
+   tela inicial como de costume.
+
+Proteções: pela internet, sem aparelho pareado só abre a página de pareamento (API fechada); o aparelho guarda um
+token num cookie `HttpOnly`/`Secure`/`SameSite=Strict` e a extensão guarda só o hash; 5 códigos errados por IP (ou
+30 no total) em 10 minutos bloqueiam novas tentativas; a lista de aparelhos na tela do lich tem **Revogar**;
+pareamentos, recusas e liga/desliga ficam em `funnel.log`; desligar a chave tira o acesso público na hora. Quem
+tem um aparelho pareado controla os agentes do PC: revogue o que perder.
 
 ## Ligar as perguntas e as permissões (Claude Code)
 

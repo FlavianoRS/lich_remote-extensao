@@ -24,6 +24,7 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/lichdotdev/lich/extension"
+	"tailscale.com/tsnet"
 )
 
 const extID = "remoto"
@@ -46,7 +47,9 @@ type Config struct {
 	VapidPub  string                 `json:"vapidPub"`
 	VapidPriv string                 `json:"vapidPriv"`
 	Subs      []webpush.Subscription `json:"subs"`
-	Follow    map[string]bool        `json:"follow,omitempty"` // sessões acompanhadas: notificação ao terminar
+	Follow    map[string]bool        `json:"follow,omitempty"`  // sessões acompanhadas: notificação ao terminar
+	Funnel    bool                   `json:"funnel,omitempty"`  // acesso pela internet (Tailscale Funnel), só aparelhos pareados
+	Devices   []Device               `json:"devices,omitempty"` // aparelhos pareados para o Funnel
 }
 
 type Entry struct {
@@ -98,6 +101,9 @@ type App struct {
 	clients  map[chan []byte]struct{}
 	lastSnap string
 	surface  bool
+	mux      http.Handler
+	tsrv     *tsnet.Server
+	fun      funnelState
 }
 
 func newID() string {
@@ -121,6 +127,7 @@ func runExtension() {
 	a.loadConfig()
 
 	mux := a.routes()
+	a.mux = mux
 	go a.serveLoopback(mux)
 	go a.serveTailnet(mux)
 	go a.poll()

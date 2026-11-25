@@ -71,6 +71,15 @@ func (a *App) serveTailnet(mux *http.ServeMux) {
 					time.Sleep(5 * time.Second)
 					continue
 				}
+				a.mu.Lock()
+				a.tsrv = s
+				funnel := a.cfg.Funnel
+				a.mu.Unlock()
+				if funnel {
+					go a.startFunnel()
+				} else {
+					go clearFunnelConfig(s)
+				}
 				h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					who, err := lc.WhoIs(r.Context(), r.RemoteAddr)
 					if err != nil || who.Node == nil || who.Node.User != self {
@@ -82,9 +91,7 @@ func (a *App) serveTailnet(mux *http.ServeMux) {
 						httpErr(w, 403, "falta X-Remoto")
 						return
 					}
-					w.Header().Set("X-Content-Type-Options", "nosniff")
-					w.Header().Set("Referrer-Policy", "no-referrer")
-					w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'")
+					secHeaders(w)
 					mux.ServeHTTP(w, r)
 				})
 				log.Print("PWA em https://" + info.Addr)
@@ -156,6 +163,7 @@ func (a *App) render() {
 		row = append(row, btn("Copiar endereço", "copy", extension.VariantSecondary))
 	}
 	kids = append(kids, extension.Box.New(extension.BoxProps{Direction: extension.DirectionRow, Gap: 8}, row...))
+	kids = append(kids, a.funnelNodes(ts.Addr)...)
 
 	// Acompanhar: o celular avisa quando a sessão termina um turno ou fica aguardando. O histórico aparece no
 	// celular para qualquer sessão; marcar aqui é para começar no PC e seguir pelo celular.
@@ -182,7 +190,23 @@ func (a *App) onSurfaceEvent(h string) {
 		a.setFollow(id, !a.followed(id))
 		return
 	}
+	if id, ok := strings.CutPrefix(h, "revoke:"); ok {
+		a.revoke(id)
+		a.render()
+		return
+	}
 	switch h {
+	case "funnel":
+		a.mu.Lock()
+		on := !a.cfg.Funnel
+		a.mu.Unlock()
+		a.setFunnel(on)
+	case "pair":
+		if ts.Addr != "" {
+			a.newPairing(ts.Addr)
+		}
+	case "funnel-acl":
+		a.conn.Send(extension.OpenExternal.New(extension.OpenExternalData{URL: "https://login.tailscale.com/admin/acls/file"}))
 	case "remote-on":
 		a.setRemote(true)
 	case "remote-off":
