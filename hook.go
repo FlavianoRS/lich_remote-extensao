@@ -185,6 +185,8 @@ func hookOutput(p *Pending, rep Reply) any {
 			return map[string]any{"decision": "allow"}
 		case "deny":
 			return map[string]any{"decision": "deny", "reason": denyMessage(rep)}
+		case "pc": // "ask" respeita o "Always Allow" e pode rodar sem perguntar; force_ask sempre mostra o diálogo
+			return map[string]any{"decision": "force_ask"}
 		}
 		return nil
 	}

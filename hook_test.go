@@ -33,8 +33,9 @@ func TestHookOutputAntigravity(t *testing.T) {
 	if string(out) != `{"decision":"deny","reason":"não"}` {
 		t.Fatalf("negar: %s", out)
 	}
-	if hookOutput(p, Reply{Action: "pc"}) != nil {
-		t.Fatal("pc deve deixar a decisão para o PC")
+	out, _ = json.Marshal(hookOutput(p, Reply{Action: "pc"}))
+	if string(out) != `{"decision":"force_ask"}` {
+		t.Fatalf("pc: %s", out)
 	}
 }
 
